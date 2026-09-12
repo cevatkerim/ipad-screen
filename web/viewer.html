@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>iPad Screen</title>
+<style>
+html,body { margin:0; background:#10151e; color:#eff4ff; font:16px system-ui; height:100%; overflow:hidden }
+main { height:100%; display:grid; place-items:center }
+img { width:100%; height:100%; object-fit:contain; position:absolute; inset:0 }
+nav { position:fixed; bottom:12px; left:12px; display:flex; align-items:center; gap:12px;
+      background:#10151ee8; border:1px solid #58647a; padding:10px; border-radius:12px }
+button { font:inherit; padding:6px 12px; border:0; border-radius:6px }
+</style>
+<main><p id="start">Connecting over USB…</p><img id="screen" alt="Linux desktop" hidden></main>
+<nav><span id="status">Connecting</span><button id="pause">Pause</button><button id="full">Full screen</button></nav>
+<script>
+const base = location.pathname.replace(/\/$/, '');
+const picture = document.getElementById('screen');
+const status = document.getElementById('status');
+let paused = false, count = 0, lastURL = null, lastReport = 0;
+const began = performance.now();
+document.getElementById('pause').onclick = e => {
+  paused = !paused; e.target.textContent = paused ? 'Resume' : 'Pause';
+  if (paused) status.textContent = 'Paused';
+};
+document.getElementById('full').onclick = async () => {
+  try { await document.documentElement.requestFullscreen(); }
+  catch { status.textContent = 'Use Safari → Add to Home Screen for full screen'; }
+};
+async function report(extra) {
+  await fetch(base + '/report', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({screen:[screen.width,screen.height], dpr:devicePixelRatio,
+      viewport:[innerWidth,innerHeight], webcodecs:typeof VideoDecoder !== 'undefined',
+      secure:isSecureContext, frames:count, ...extra})});
+}
+async function next() {
+  const tick = performance.now();
+  if (!paused && !document.hidden) {
+    try {
+      const response = await fetch(base + '/frame', {cache:'no-store', signal:AbortSignal.timeout(10000)});
+      if (!response.ok) throw Error('Capture unavailable');
+      const url = URL.createObjectURL(await response.blob());
+      picture.src = url;
+      try { await picture.decode(); } catch (error) { URL.revokeObjectURL(url); throw error; }
+      if (lastURL) URL.revokeObjectURL(lastURL);
+      lastURL = url; picture.hidden = false;
+      document.getElementById('start').hidden = true;
+      count++;
+      status.textContent = `USB · ${picture.naturalWidth}×${picture.naturalHeight} · PNG`;
+      if (tick - lastReport > 2000 || count === 1) {
+        lastReport = tick;
+        await report({image:[picture.naturalWidth,picture.naturalHeight],
+          elapsed_ms:Math.round(performance.now()-began), last_frame_ms:Math.round(performance.now()-tick)});
+      }
+    } catch (error) { status.textContent = 'Disconnected · retrying'; }
+  }
+  setTimeout(next, Math.max(30, 200 - (performance.now()-tick)));
+}
+next();
+</script>
+</html>
