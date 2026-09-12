@@ -26,6 +26,8 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
     BOOL _hardware;
     uint32_t _received, _decoded, _displayed, _errors;
     uint32_t _width, _height;
+    OSStatus _lastError;
+    NSString *_lastStage;
     NSTimeInterval _started, _lastStatus;
 }
 @property(nonatomic) AVSampleBufferDisplayLayer *video;
@@ -71,7 +73,7 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
     _lastStatus = now;
     NSDictionary *report = @{ @"state":state, @"received":@(_received), @"decoded":@(_decoded),
         @"displayed":@(_displayed), @"errors":@(_errors), @"width":@(_width), @"height":@(_height),
-        @"hardware_h264_supported":@(_hardware), @"elapsed_seconds":@(MAX(0, now - _started)), @"timestamp":@(now) };
+        @"hardware_h264_supported":@(_hardware), @"last_osstatus":@(_lastError), @"last_stage":_lastStage ?: @"none", @"elapsed_seconds":@(MAX(0, now - _started)), @"timestamp":@(now) };
     [[NSJSONSerialization dataWithJSONObject:report options:0 error:nil] writeToFile:StatusPath atomically:YES];
 }
 - (void)resetDecoder {
@@ -83,15 +85,15 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
     [self resetDecoder];
     const uint8_t *sets[] = {_sps.bytes, _pps.bytes}; size_t sizes[] = {_sps.length, _pps.length};
     OSStatus result = CMVideoFormatDescriptionCreateFromH264ParameterSets(kCFAllocatorDefault, 2, sets, sizes, 4, &_format);
-    if (result) return NO;
+    if (result) { _lastError = result; return NO; }
     CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(_format);
     if (dims.width <= 0 || dims.height <= 0 || dims.width > 4096 || dims.height > 4096) return NO;
     _width = dims.width; _height = dims.height;
     VTDecompressionOutputCallbackRecord callback = {Decoded, (__bridge void *)self};
-    NSDictionary *attributes = @{(__bridge NSString *)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)};
+    NSDictionary *attributes = @{(__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey:@{}};
     result = VTDecompressionSessionCreate(kCFAllocatorDefault, _format, NULL,
                                           (__bridge CFDictionaryRef)attributes, &callback, &_decoder);
-    if (result) return NO;
+    if (result) { _lastError = result; return NO; }
     // iOS headers do not expose macOS's per-session hardware-selection key.
     _hardware = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264);
     return YES;
@@ -123,18 +125,19 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
     CMBlockBufferRef block = NULL; CMSampleBufferRef sample = NULL;
     OSStatus result = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, NULL, picture.length,
         kCFAllocatorDefault, NULL, 0, picture.length, 0, &block);
-    if (!result) result = CMBlockBufferReplaceDataBytes(picture.bytes, block, 0, picture.length);
+    _lastStage = @"block-create";
+    if (!result) { _lastStage = @"block-copy"; result = CMBlockBufferReplaceDataBytes(picture.bytes, block, 0, picture.length); }
     size_t size = picture.length;
     CMSampleTimingInfo timing = {kCMTimeInvalid, CMTimeMake(_received, 30), kCMTimeInvalid};
-    if (!result) result = CMSampleBufferCreateReady(kCFAllocatorDefault, block, _format, 1, 1, &timing, 1, &size, &sample);
-    if (!result) result = VTDecompressionSessionDecodeFrame(_decoder, sample, 0, NULL, NULL);
+    if (!result) { _lastStage = @"sample-create"; result = CMSampleBufferCreateReady(kCFAllocatorDefault, block, _format, 1, 1, &timing, 1, &size, &sample); }
+    if (!result) { _lastStage = @"decode-frame"; result = VTDecompressionSessionDecodeFrame(_decoder, sample, 0, NULL, NULL); }
     if (!result) VTDecompressionSessionWaitForAsynchronousFrames(_decoder);
-    if (result) { _errors++; _needsIDR = YES; }
+    if (result) { _lastError = result; _errors++; _needsIDR = YES; }
     if (sample) CFRelease(sample); if (block) CFRelease(block);
     [self status:@"streaming" force:NO];
 }
 - (void)decodedImage:(CVImageBufferRef)image status:(OSStatus)status {
-    if (status || !image) { _errors++; return; }
+    if (status || !image) { _lastError = status; _errors++; return; }
     _decoded++;
     dispatch_sync(dispatch_get_main_queue(), ^{
         CMVideoFormatDescriptionRef format = NULL; CMSampleBufferRef sample = NULL;

@@ -23,7 +23,7 @@ payload = io.BytesIO()
 with tarfile.open(fileobj=payload, mode='w') as archive:
     archive.add(app, arcname='iPadScreen.app')
 subprocess.run(ssh_args(config) + ['mobile@ipad-usb',
-    'set -eu; mkdir -p /var/mobile/Applications; '
+    'set -eu; killall iPadScreen 2>/dev/null || true; mkdir -p /var/mobile/Applications; '
     'tar -xf - -C /var/mobile/Applications; '
     'chmod 755 /var/mobile/Applications/iPadScreen.app/iPadScreen; '
     '/var/jb/usr/bin/uicache -p /var/mobile/Applications/iPadScreen.app; '
