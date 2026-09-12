@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+IPAD_TOOLCHAIN="${IPAD_TOOLCHAIN:-$PWD/../iphone-control/.toolchain}"
+IPAD_SDK="$IPAD_TOOLCHAIN/sdks/iPhoneOS16.5.sdk"
+export LD_LIBRARY_PATH="$IPAD_TOOLCHAIN/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+mkdir -p build/iPadScreen.app
+cp device/Info.plist build/iPadScreen.app/Info.plist
+clang -target arm64-apple-ios15.0 -isysroot "$IPAD_SDK" -fobjc-arc -fblocks -O2 -Wall -Wextra -Wno-unused-parameter \
+  --ld-path="$IPAD_TOOLCHAIN/usr/bin/ld64.lld" -Wl,-platform_version,ios,15.0,16.5 \
+  -framework UIKit -framework Foundation -framework AVFoundation -framework VideoToolbox \
+  -framework CoreMedia -framework CoreVideo -framework QuartzCore \
+  device/main.m -o build/iPadScreen.app/iPadScreen
+"$IPAD_TOOLCHAIN/ldid" -Sdevice/entitlements.plist build/iPadScreen.app/iPadScreen
+printf 'Built build/iPadScreen.app\n'
