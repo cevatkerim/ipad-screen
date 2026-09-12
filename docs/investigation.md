@@ -44,6 +44,11 @@ with scale 2 triggered two successful recoveries: 1,270 frames queued, zero
 receiver errors. Automated cases cover layout changes, EOF, stalls, retry limits
 and child-process cleanup.
 
+The large overlay was also replaced with a 44-point display button at the
+bottom-left safe-area edge. Statistics open only from that button. Hide controls
+persists the hidden state; a two-finger tap restores access. Ordinary video taps
+no longer toggle the overlay, and a disconnected session does not force it open.
+
 - Connected device: iPad Pro 10.5-inch (`iPad7,3`), iPadOS 17.7.10, rootless
   jailbreak layout at `/var/jb`, OpenSSH 9.7p1. Exact jailbreak brand not identified.
 - Existing host public key installed for `mobile`; a fresh batch-mode login

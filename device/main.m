@@ -32,6 +32,9 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
 }
 @property(nonatomic) AVSampleBufferDisplayLayer *video;
 @property(nonatomic) UILabel *label;
+@property(nonatomic) UIView *statsPanel;
+@property(nonatomic) UIButton *controlsButton;
+@property(nonatomic) UIButton *hideButton;
 @property(nonatomic) BOOL showStats;
 @end
 
@@ -44,23 +47,65 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
     self.video = [AVSampleBufferDisplayLayer layer];
     self.video.videoGravity = AVLayerVideoGravityResizeAspect;
     [self.view.layer addSublayer:self.video];
+    self.statsPanel = [[UIView alloc] init];
+    self.statsPanel.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.9];
+    self.statsPanel.layer.cornerRadius = 12;
+    self.statsPanel.hidden = YES;
+    [self.view addSubview:self.statsPanel];
     self.label = [[UILabel alloc] init];
     self.label.textColor = UIColor.whiteColor;
-    self.label.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.85];
-    self.label.font = [UIFont monospacedSystemFontOfSize:16 weight:UIFontWeightMedium];
+    self.label.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightMedium];
     self.label.numberOfLines = 0;
-    self.label.text = @"iPad Screen\nConnect your computer by USB";
-    [self.view addSubview:self.label];
-    [self.view addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleStats)]];
+    self.label.text = @"iPad Screen\nReady to connect";
+    [self.statsPanel addSubview:self.label];
+    self.controlsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.controlsButton setImage:[UIImage systemImageNamed:@"display"] forState:UIControlStateNormal];
+    self.controlsButton.tintColor = UIColor.whiteColor;
+    self.controlsButton.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.55];
+    self.controlsButton.layer.cornerRadius = 22;
+    self.controlsButton.accessibilityLabel = @"Display controls";
+    self.controlsButton.accessibilityHint = @"Show or close display statistics";
+    self.controlsButton.hidden = [NSUserDefaults.standardUserDefaults boolForKey:@"hideDisplayControls"];
+    [self.controlsButton addTarget:self action:@selector(toggleStats) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.controlsButton];
+    self.hideButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.hideButton setTitle:@"Hide controls" forState:UIControlStateNormal];
+    self.hideButton.tintColor = UIColor.whiteColor;
+    self.hideButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.hideButton.accessibilityHint = @"A two-finger tap brings the controls back";
+    [self.hideButton addTarget:self action:@selector(hideControls) forControlEvents:UIControlEventTouchUpInside];
+    [self.statsPanel addSubview:self.hideButton];
+    UITapGestureRecognizer *reveal = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(revealControls)];
+    reveal.numberOfTouchesRequired = 2;
+    reveal.cancelsTouchesInView = NO;
+    [self.view addGestureRecognizer:reveal];
     UIApplication.sharedApplication.idleTimerDisabled = YES;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{ [self listen]; });
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     self.video.frame = self.view.bounds;
-    self.label.frame = CGRectMake(20, 20, MIN(650, self.view.bounds.size.width - 40), 90);
+    UIEdgeInsets safe = self.view.safeAreaInsets;
+    CGFloat left = safe.left + 12;
+    CGFloat bottom = self.view.bounds.size.height - safe.bottom - 12;
+    CGFloat width = MIN(320, self.view.bounds.size.width - left - safe.right - 12);
+    self.controlsButton.frame = CGRectMake(left, bottom - 44, 44, 44);
+    self.statsPanel.frame = CGRectMake(left, bottom - 44 - 8 - 116, width, 116);
+    self.label.frame = CGRectMake(12, 8, width - 24, 64);
+    self.hideButton.frame = CGRectMake(8, 72, width - 16, 40);
 }
-- (void)toggleStats { self.showStats = !self.showStats; self.label.hidden = !self.showStats && _queued > 0; }
+- (void)toggleStats {
+    self.showStats = !self.showStats;
+    self.statsPanel.hidden = !self.showStats;
+}
+- (void)hideControls {
+    self.showStats = NO; self.statsPanel.hidden = YES; self.controlsButton.hidden = YES;
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"hideDisplayControls"];
+}
+- (void)revealControls {
+    self.controlsButton.hidden = NO;
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"hideDisplayControls"];
+}
 - (void)status:(NSString *)state force:(BOOL)force {
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     if (!force && now - _lastStatus < 1) return;
@@ -139,7 +184,6 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
                 [self.video flush];
             }
             self->_renderStatus = self.video.status;
-            self.label.hidden = !self.showStats;
             self.label.text = [NSString stringWithFormat:@"USB · %u×%u · native H.264\n%u frames · %u errors", self->_width, self->_height, self->_queued, self->_errors];
         });
     }
@@ -180,7 +224,10 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
             if (!WriteAll(fd, ack, sizeof(ack))) break;
         }}
         close(fd); [self resetFormat]; [self status:@"disconnected" force:YES];
-        dispatch_sync(dispatch_get_main_queue(), ^{ [self.video flushAndRemoveImage]; self.label.hidden = NO; self.label.text = @"iPad Screen\nUSB stream stopped · Ready to reconnect"; });
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            [self.video flushAndRemoveImage];
+            self.label.text = @"iPad Screen\nSession ended · Ready to reconnect";
+        });
     }}
 }
 @end

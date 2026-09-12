@@ -57,8 +57,12 @@ The deployment target is iPadOS 15+, but only 17.7.10 has been tested.
 
 Installation registers `/var/mobile/Applications/iPadScreen.app`, provisions a
 random receiver token over SSH, and launches the app. Updates restart only this
-app. The app's icon is currently the system placeholder. Tap its screen to toggle
-frame statistics. Auto-lock is disabled while the app is active.
+app. The app's Home Screen icon is currently the system placeholder. In the app,
+tap the small bottom-left display icon to open or close statistics. Choose
+**Hide controls** to remove the icon and panel; a **two-finger tap anywhere**
+restores the icon. Hidden controls stay hidden across reconnects and app launches.
+Ordinary taps on the video do not open statistics. Auto-lock is disabled while
+the app is active.
 
 ## Try the display
 
@@ -86,7 +90,7 @@ frame statistics. Auto-lock is disabled while the app is active.
 The companion opens automatically. In extend mode the temporary `ipad-screen` monitor
 appears to the right of existing monitors; move a window onto it using the normal
 desktop controls. Use the host's keyboard and mouse. iPad touch controls the
-the stats overlay only; desktop touch input is not implemented. The app renders
+stats panel only; desktop touch input is not implemented. The app renders
 fullscreen and preserves the source aspect ratio. Mirroring a screen with a
 different aspect ratio produces letterboxing.
 
