@@ -14,7 +14,10 @@ test delivered 881 frames in 30 seconds with no reported rendering errors, using
 VA-API hardware encoding on Linux and Apple's native video display layer.
 
 This is still a prototype. The iPad 9 profile is implemented but untested on the
-actual device. The Omarchy bar interface is available in the separate public
+actual device. The second connected iPad turned out to be a **Pro 9.7-inch**;
+its new `pro97` profile has passed native extend/mirror tests on iPadOS 16.7.16
+with Dopamine (zero reported rendering errors; visual smoothness confirmation
+pending). The Omarchy bar interface is available in the separate public
 [plugin repository](https://github.com/cevatkerim/omarchy-ipad-screen). Mac/Windows
 hosts and desktop touch input are future work. See [the investigation](docs/investigation.md) for evidence,
 limitations, and the platform plan. Earlier browser and manual-decoder experiments
@@ -57,8 +60,10 @@ The Linux cross-build uses clang plus the existing iOS SDK, linker, and ldid in
 with the same layout. SDK/toolchain files and built binaries are not committed.
 The deployment target is iPadOS 15+, but only 17.7.10 has been tested.
 
-Installation registers `/var/mobile/Applications/iPadScreen.app`, provisions a
-random receiver token over SSH, and launches the app. Updates restart only this
+Installation registers the app, provisions a random receiver token over SSH,
+and verifies its listener after launch. Dopamine uses `/var/jb/Applications`
+with mobile sudo and PASSWORD from `--env-file`; other tested rootless layouts
+use `/var/mobile/Applications`. See [device setup](docs/another-ipad.md). Updates restart only this
 app. The app's Home Screen icon is currently the system placeholder. In the app,
 tap the small bottom-left display icon to open or close statistics. Choose
 **Hide controls** to remove the icon and panel; a **two-finger tap anywhere**
@@ -74,6 +79,8 @@ the app is active.
 
 # iPad 9: 2160×1620, after pairing that device
 ./scripts/native.py --mode extend --model ipad9
+
+# Normally the saved paired-device model is used automatically, including pro97.
 
 # Mirror the focused monitor, or explicitly choose an existing output
 ./scripts/native.py --mode mirror

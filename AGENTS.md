@@ -10,5 +10,7 @@
   runtime logs out of commits. Device state lives in ignored .runtime/.
 - Device actions must target the paired iPad. Preserve unrelated apps, keys and
   configuration. Temporary Hyprland outputs must be removed when sessions stop.
-- Native rendering is verified on the Pro 10.5/iPadOS 17.7.10. Treat iPad 9 and
+- Native rendering is verified on the Pro 10.5/iPadOS 17.7.10. The Pro 9.7 on
+  16.7.16/Dopamine also accepts native extend/mirror streams without renderer
+  errors; visual smoothness confirmation for that device is still pending. Treat iPad 9 and
   Mac/Windows support as unverified until tested on those actual devices.

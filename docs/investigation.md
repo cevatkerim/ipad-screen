@@ -23,7 +23,43 @@ The native protocol directly connects to an authenticated loopback receiver
 through usbmux. SSH is used for setup, installation, launch and diagnostics.
 The app is installed under mobile's Applications directory on the rootless
 jailbreak. Seven automated transport/framing tests pass. See [protocol.md](protocol.md)
-and the README for the working commands. A Linux GUI remains future work.
+and the README for the working commands. An Omarchy bar GUI was added next;
+see the follow-up below.
+
+## Omarchy plugin and second iPad
+
+The public [omarchy-ipad-screen repository](https://github.com/cevatkerim/omarchy-ipad-screen)
+contains a Quattro bar widget and a small Python controller. The native backend
+remains separate. The widget offers Extend, Mirror, Stop, encoder selection,
+USB connection status and diagnostics. Its transient systemd user service owns
+capture independently of QML reloads. Live disable/re-enable and a plugin update
+from public GitHub left the mirror session running. The installed panel was
+visually inspected; shell summon/hide and Escape were exercised. Three controller
+tests pass, in addition to twelve backend tests.
+
+The second iPad reported `iPad6,4`, iPadOS 16.7.16: a Pro 9.7-inch, not the
+previously assumed iPad 9th generation. A `pro97` profile uses 2048×1536 at scale
+2. Pairing now preserves existing devices in a local profile registry, assigns
+separate tokens to new devices, and allows switching back without a password.
+
+On this Dopamine jailbreak, the original `/var/mobile/Applications` installation
+registered an icon but launchd refused to spawn it with error 1 (Operation not
+permitted). No app receiver status file was created. Explicit ad-hoc signing
+alone did not resolve it. Registering the same signed build under the jailbreak's
+standard `/var/jb/Applications` directory did, and the owner confirmed that it
+launched. The installer now detects the Dopamine jbctl layout, uses mobile sudo
+only for this app's directory, and verifies a fresh listener status. A repeat
+installation succeeded. No global trust cache, jailbreak configuration, other
+apps, or system launch services were modified.
+
+Through the plugin controller, native 2048×1536 extension queued 3,084 frames in
+104.44 seconds with zero reported renderer errors. A subsequent 2880×1800 mirror
+session queued 4,420 frames in 148.37 seconds with zero errors; an in-session
+receiver sample reported zero drops and hardware H.264 support. Both ran at the
+default requested 30 fps. These counters establish sustained submission to the
+native renderer, not visual smoothness or latency; owner confirmation of playback
+on this device remains pending. Both sessions stopped cleanly. The iPad 9 profile
+remains untested on actual iPad 9 hardware.
 
 After removing the manual decoder, a 20-second mirror test at 2880×1800 with
 60 fps requested submitted 654 frames (about 32 fps), with zero receiver drops

@@ -12,7 +12,8 @@ This Computer**. Keep the device jailbroken and unlocked during setup.
 - `/var/jb/usr/bin/uicache` and `/var/jb/usr/bin/uiopen` must exist. Rootful layouts
   are not supported by the current installer.
 - iPadOS 15+ is the build target. Actual runtime compatibility must be tested;
-  the Pro 10.5 on 17.7.10 was verified first.
+  the Pro 10.5 on 17.7.10 was verified first. The Pro 9.7 on 16.7.16
+  with Dopamine also reaches its listener and accepts full-resolution video.
 
 ## Pair and choose the correct profile
 
@@ -66,13 +67,18 @@ are rejected. Pairing is separate from Apple's USB trust dialog.
 # Needed once per app version, not for every iPad:
 ./scripts/build-app
 # Targets only the active paired device:
-./scripts/install-app.py
+./scripts/install-app.py --env-file ../.env
 ```
 
 The builder needs clang, the iOS SDK and signing tools described in the README.
 If `build/iPadScreen.app` is already built, reuse it for the next iPad. The installer
 copies that bundle, registers its icon, provisions a random token for that device,
-and requests launch. Open **iPad Screen** on the iPad if needed. The screen stays
+and verifies its USB listener after launch. On Dopamine (detected via
+`/var/jb/basebin/jbctl`), it installs under `/var/jb/Applications` using mobile
+`sudo` and the supplied PASSWORD over SSH stdin. Other tested rootless layouts
+use `/var/mobile/Applications`. Override with `--location jailbreak` or
+`--location mobile` when needed. The installer refuses to interrupt a running
+display session. Open **iPad Screen** on the iPad if needed. The screen stays
 black until a stream arrives; tap the small bottom-left display icon for status.
 
 Test an animated pattern before using it for work:
@@ -116,6 +122,10 @@ Never commit or publish `.runtime/`, `.env`, SSH keys, or copied device logs.
   before editing the project's known-hosts file.
 - App installed but port unavailable: keep it foregrounded; try opening its icon
   and look for an immediate launch failure. It must reach its listening state.
+  On the Pro 9.7/Dopamine, registering under `/var/mobile/Applications` led to
+  launchd error 1 (Operation not permitted). Moving this app to the standard
+  jailbreak Applications directory resolved it; changing signing flags alone
+  did not. Use the current installer or `--location jailbreak`.
 - Receiver rejected handshake: run the installer for the selected device to
   provision its current token, then retry.
 - A terminal session is running: stop it there before starting from the plugin.

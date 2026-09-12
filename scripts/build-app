@@ -11,5 +11,5 @@ clang -target arm64-apple-ios15.0 -isysroot "$IPAD_SDK" -fobjc-arc -fblocks -O2 
   -framework UIKit -framework Foundation -framework AVFoundation -framework VideoToolbox \
   -framework CoreMedia -framework CoreVideo -framework QuartzCore \
   device/main.m -o build/iPadScreen.app/iPadScreen
-"$IPAD_TOOLCHAIN/ldid" -Sdevice/entitlements.plist build/iPadScreen.app/iPadScreen
+"$IPAD_TOOLCHAIN/ldid" -Cadhoc -Sdevice/entitlements.plist build/iPadScreen.app/iPadScreen
 printf 'Built build/iPadScreen.app\n'
