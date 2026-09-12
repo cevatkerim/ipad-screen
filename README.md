@@ -14,8 +14,9 @@ test delivered 881 frames in 30 seconds with no reported rendering errors, using
 VA-API hardware encoding on Linux and Apple's native video display layer.
 
 This is still a prototype. The iPad 9 profile is implemented but untested on the
-actual device. Mac/Windows hosts, desktop touch input and a Linux graphical UI
-are future work. See [the investigation](docs/investigation.md) for evidence,
+actual device. The Omarchy bar interface is available in the separate public
+[plugin repository](https://github.com/cevatkerim/omarchy-ipad-screen). Mac/Windows
+hosts and desktop touch input are future work. See [the investigation](docs/investigation.md) for evidence,
 limitations, and the platform plan. Earlier browser and manual-decoder experiments
 are preserved in Git history.
 
@@ -29,7 +30,7 @@ The companion requires an unlocked device and a rootless jailbreak with
 
 ```sh
 ./scripts/ipad.py devices
-./scripts/ipad.py pair --udid YOUR_DEVICE_ID --env-file ../.env
+./scripts/ipad.py pair --udid YOUR_DEVICE_ID --model pro105 --env-file ../.env
 ./scripts/ipad.py ssh 'id -un'
 ```
 
@@ -40,8 +41,9 @@ another existing key. The private key stays in its original location.
 
 The first SSH host key is trusted on first use over the selected USB connection;
 subsequent changes are rejected. Device selection and known hosts are stored in
-the ignored `.runtime/` directory. Pair again with another UDID to switch the
-active iPad; this prototype supports one display session at a time.
+the ignored `.runtime/` directory. Saved profiles preserve each pairing. Use `pair --model pro105|pro97|ipad9`
+for a new device and `select --udid ...` to switch back. This prototype supports
+one display session at a time. See [the second-iPad setup guide](docs/another-ipad.md).
 
 ## Build and install the companion
 

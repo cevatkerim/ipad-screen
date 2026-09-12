@@ -12,7 +12,7 @@ import sys
 
 from capture import recovering_frames
 
-from ipad import RUNTIME, ssh_args
+from ipad import RUNTIME, receiver_token, ssh_args
 from screen import hypr
 from usbmux_proxy import connect, read_exact
 
@@ -76,7 +76,7 @@ def encoder_command(args, name, width, height, path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=['extend', 'mirror', 'test'], default='extend')
-    parser.add_argument('--model', choices=['pro105', 'ipad9'], default='pro105')
+    parser.add_argument('--model', choices=['pro105', 'pro97', 'ipad9'], help='Default: paired device profile')
     parser.add_argument('--output', help='Existing output to mirror')
     parser.add_argument('--fps', type=int, choices=[30, 60], default=30)
     parser.add_argument('--seconds', type=int, default=0)
@@ -87,12 +87,13 @@ def main():
     if args.seconds < 0:
         parser.error('--seconds must be nonnegative')
     config = json.loads((RUNTIME / 'device.json').read_text())
-    token = (RUNTIME / 'receiver-token').read_text().strip()
+    args.model = args.model or config.get('model', 'pro105')
+    token = receiver_token(config).read_text().strip()
     if not re.fullmatch('[0-9a-f]{64}', token):
         raise ValueError('Invalid receiver token; run install-app.py')
     lock = (RUNTIME / 'screen.lock').open('w')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    width, height = (2224, 1668) if args.model == 'pro105' else (2160, 1620)
+    width, height = {'pro105': (2224, 1668), 'pro97': (2048, 1536), 'ipad9': (2160, 1620)}[args.model]
     if args.test_size:
         if args.mode != 'test' or not re.fullmatch(r'[1-9][0-9]{1,3}x[1-9][0-9]{1,3}', args.test_size):
             parser.error('--test-size requires test mode and dimensions such as 1280x720')

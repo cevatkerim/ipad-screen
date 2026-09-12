@@ -13,6 +13,24 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / '.runtime'
 
 
+def receiver_token(config):
+    """Separate tokens per iPad; retain the original pairing's legacy token."""
+    return RUNTIME / config.get('token_file', 'receiver-token')
+
+
+def save_device(config):
+    profiles_path = RUNTIME / 'devices.json'
+    profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
+    active = RUNTIME / 'device.json'
+    if active.exists():
+        previous = json.loads(active.read_text())
+        profiles[previous['udid']] = previous
+    profiles[config['udid']] = config
+    for path, value in ((profiles_path, profiles), (active, config)):
+        path.write_text(json.dumps(value, indent=2) + '\n')
+        path.chmod(0o600)
+
+
 def password(path):
     """Read a literal PASSWORD value without executing shell/.env content."""
     for line in Path(path).read_text().splitlines():
@@ -52,6 +70,9 @@ def main():
     pair.add_argument('--udid', required=True)
     pair.add_argument('--key', default='~/.ssh/id_ed25519')
     pair.add_argument('--env-file', default=str(ROOT.parent / '.env'))
+    pair.add_argument('--model', choices=['pro105', 'pro97', 'ipad9'], required=True)
+    select = sub.add_parser('select', help='Use a previously paired device')
+    select.add_argument('--udid', required=True)
     ssh = sub.add_parser('ssh')
     ssh.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -60,12 +81,29 @@ def main():
         return
     RUNTIME.mkdir(mode=0o700, exist_ok=True)
     config_path = RUNTIME / 'device.json'
+    if args.action == 'select':
+        profiles = json.loads((RUNTIME / 'devices.json').read_text())
+        if args.udid not in profiles:
+            raise ValueError('Device has not been paired on this host')
+        save_device(profiles[args.udid])
+        print('Selected saved iPad pairing.')
+        return
     if args.action == 'pair':
         key = Path(args.key).expanduser().resolve()
         public_key = Path(str(key) + '.pub').read_text().strip()
         if '\n' in public_key or not public_key.startswith(('ssh-ed25519 ', 'ssh-rsa ', 'ecdsa-sha2-')):
             raise ValueError('Expected one OpenSSH public key')
-        config = {'udid': args.udid, 'key': str(key)}
+        if not re.fullmatch(r'[A-Fa-f0-9-]+', args.udid):
+            raise ValueError('Invalid device ID')
+        profiles_path = RUNTIME / 'devices.json'
+        profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
+        if config_path.exists():
+            previous = json.loads(config_path.read_text())
+            profiles[previous['udid']] = previous
+        config = dict(profiles.get(args.udid, {}), udid=args.udid,
+                      key=str(key), model=args.model)
+        if args.udid not in profiles:
+            config['token_file'] = f'receiver-token-{args.udid}'
         env = dict(os.environ, SSH_ASKPASS=str(Path(__file__).resolve()),
                    SSH_ASKPASS_REQUIRE='force', DISPLAY='ipad-screen:0',
                    IPAD_SCREEN_ASKPASS='1',
@@ -83,8 +121,7 @@ def main():
                        env=env, stdin=subprocess.DEVNULL, check=True, timeout=30)
         subprocess.run(ssh_args(config) + ['mobile@ipad-usb', 'id -un'],
                        stdin=subprocess.DEVNULL, check=True, timeout=20)
-        config_path.write_text(json.dumps(config, indent=2) + '\n')
-        config_path.chmod(0o600)
+        save_device(config)
         print('Public key installed; passwordless USB SSH verified.')
     else:
         config = json.loads(config_path.read_text())

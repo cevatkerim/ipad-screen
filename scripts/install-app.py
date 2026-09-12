@@ -6,13 +6,13 @@ import secrets
 import subprocess
 import tarfile
 
-from ipad import ROOT, RUNTIME, ssh_args
+from ipad import ROOT, RUNTIME, receiver_token, ssh_args
 
 config = json.loads((RUNTIME / 'device.json').read_text())
 app = ROOT / 'build/iPadScreen.app'
 if not (app / 'iPadScreen').is_file():
     raise SystemExit('Run ./scripts/build-app first')
-token_path = RUNTIME / 'receiver-token'
+token_path = receiver_token(config)
 if not token_path.exists():
     token_path.write_text(secrets.token_hex(32) + '\n')
     token_path.chmod(0o600)
