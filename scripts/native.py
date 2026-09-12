@@ -61,7 +61,7 @@ def main():
     parser.add_argument('--output', help='Existing output to mirror')
     parser.add_argument('--fps', type=int, choices=[30, 60], default=30)
     parser.add_argument('--seconds', type=int, default=0)
-    parser.add_argument('--encoder', choices=['software', 'vaapi'], default='software')
+    parser.add_argument('--encoder', choices=['software', 'vaapi'], default='vaapi')
     parser.add_argument('--gpu', default='/dev/dri/renderD128')
     parser.add_argument('--test-size', default=None, help='Override synthetic test dimensions, e.g. 1280x720')
     args = parser.parse_args()
@@ -149,7 +149,7 @@ def main():
             frames += 1
             sent += len(frame)
             if frames == 1 or frames % (args.fps * 5) == 0:
-                print(f'Frames sent/decoded/queued: {frames}/{last_ack[1]}/{last_ack[2]}; errors={last_ack[3]}', flush=True)
+                print(f'Frames sent/queued: {frames}/{last_ack[2]}; errors={last_ack[3]}', flush=True)
             if last_ack[3] > 10:
                 raise RuntimeError('Repeated iPad decoder errors; inspect its status')
         raise RuntimeError('Encoder stream ended; inspect .runtime/encoder.log')

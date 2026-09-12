@@ -77,6 +77,8 @@ def relay(sock):
                 raise ConnectionError('SSH closed its input')
             pending = pending[written:]
     # A peer may finish sending while it is still receiving our queued bytes.
+    # Signal that half-close to SSH before waiting for its remaining input.
+    os.close(1)
     sender.join()
 
 

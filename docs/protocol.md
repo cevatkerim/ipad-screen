@@ -16,13 +16,17 @@ sender. The receiver requests immediate presentation instead of timestamped
 playout. The initial prototype supports one session and one frame in flight.
 
 After each frame the receiver returns four big-endian uint32 counters:
-received access units, decoded image callbacks, images enqueued for display,
-and errors. Enqueue count does not prove physical panel presentation. These
-acknowledgments bound receiver queue growth and expose decoder failures.
+received access units, a reserved zero field, images enqueued for display,
+and rendering errors. The reserved field was a callback counter in the initial
+manual-decoder experiment. The working receiver gives compressed samples to
+AVSampleBufferDisplayLayer, which handles decoding and rendering internally.
+Enqueue count does not prove physical panel presentation. These acknowledgments
+bound frame submission and expose rendering failures; verify visible playback too.
 
 Disconnect, malformed length, failed authentication or socket timeout ends a
 session. The listener remains available while the app is foregrounded. On
-reconnect the decoder resets and waits for SPS/PPS plus an IDR.
+reconnect the format resets and waits for SPS/PPS plus an IDR. Renderer congestion
+or failure flushes the display queue and skips dependent frames until the next IDR.
 
 This version does not implement audio, input, timestamp synchronization, codec
 negotiation or encrypted transport independent of USB. Bind only to loopback;

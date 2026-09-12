@@ -1,5 +1,6 @@
 """Exercise transport framing and simultaneous bulk traffic without an iPad."""
 import os
+import select
 from pathlib import Path
 import socket
 import struct
@@ -14,6 +15,31 @@ from usbmux_proxy import read_exact, request
 
 
 class USBTransportTests(unittest.TestCase):
+    def test_remote_half_close_reaches_ssh_before_stdin_closes(self):
+        a, b = socket.socketpair()
+        with a, b:
+            code = ('import socket,sys; from usbmux_proxy import relay; '
+                    'relay(socket.socket(fileno=int(sys.argv[1])))')
+            child = subprocess.Popen([sys.executable, '-c', code, str(a.fileno())],
+                                     cwd=SCRIPTS, pass_fds=[a.fileno()],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            a.close()
+            try:
+                b.shutdown(socket.SHUT_WR)
+                readable, _, _ = select.select([child.stdout], [], [], 3)
+                self.assertTrue(readable, 'SSH must see remote EOF while its input remains open')
+                self.assertEqual(child.stdout.read(1), b'')
+                child.stdin.write(b'final bytes')
+                child.stdin.close()
+                self.assertEqual(read_exact(b, 11), b'final bytes')
+                self.assertEqual(child.wait(timeout=3), 0)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+                child.stdout.close()
+                child.stderr.close()
+
     def test_truncated_read_is_an_error(self):
         a, b = socket.socketpair()
         with a, b:

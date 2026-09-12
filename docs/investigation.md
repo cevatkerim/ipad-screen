@@ -3,7 +3,34 @@
 Date: 2026-09-12. Scope: both jailbroken iPads; USB; extend and mirror; crisp text
 with balanced desktop performance; Linux first, Mac and Windows apps later.
 
-## Verified locally
+## Native app milestone
+
+The investigation progressed to a working native companion during this session.
+Its UIKit interface uses AVSampleBufferDisplayLayer for fullscreen compressed
+H.264 playback. A direct VideoToolbox callback-decoder experiment returned
+OSStatus -12780 at frame submission; the system's compressed display layer
+accepted the stream and the owner confirmed smooth visible motion. The exact
+manual-decoder failure remains unexplained, and that unused path was removed.
+
+The synthetic 720p run submitted 458 frames in about 15 seconds without renderer
+errors. A full 2224×1668 extended-desktop run submitted 881 frames in 30 seconds
+and transferred 17,768,004 H.264 payload bytes, again with no reported errors.
+The host used `wf-recorder`, DMA-BUF capture and VA-API H.264 encoding through
+`/dev/dri/renderD128`. Acknowledgments count frames enqueued, not independently
+observed panel updates. Visual confirmation and counters are separate evidence.
+
+The native protocol directly connects to an authenticated loopback receiver
+through usbmux. SSH is used for setup, installation, launch and diagnostics.
+The app is installed under mobile's Applications directory on the rootless
+jailbreak. Seven automated transport/framing tests pass. See [protocol.md](protocol.md)
+and the README for the working commands. A Linux GUI remains future work.
+
+After removing the manual decoder, a 20-second mirror test at 2880×1800 with
+60 fps requested submitted 654 frames (about 32 fps), with zero receiver drops
+or rendering errors. This does not establish 60 fps support. The default remains
+30 fps; sustained latency, heat, power and colored-text quality remain unmeasured.
+
+## Initial baseline observations
 
 - Connected device: iPad Pro 10.5-inch (`iPad7,3`), iPadOS 17.7.10, rootless
   jailbreak layout at `/var/jb`, OpenSSH 9.7p1. Exact jailbreak brand not identified.
@@ -70,11 +97,11 @@ finish. This isolates a useful workaround; it does not prove the exact original
 failure mechanism. [Upstream inetcat source](https://github.com/libimobiledevice/libusbmuxd/blob/master/tools/inetcat.c)
 was reviewed when investigating the relay.
 
-For the native receiver, evaluate direct framed H.264 over a dedicated iPad TCP
-listener reached through usbmux. Add explicit session authentication before
-exposing video/input outside the existing SSH channel. Keep SSH for development
-and installation. Linux/macOS usbmux sockets and Windows device service/driver
-integration need their own packaging and reconnection tests.
+The native receiver now accepts framed H.264 over its dedicated loopback TCP
+listener reached through usbmux, authenticated with a token provisioned over
+SSH. SSH remains the development and installation channel. Linux/macOS usbmux
+sockets and Windows device service/driver integration need their own packaging
+and broader reconnection tests.
 
 ### Linux app
 
@@ -83,11 +110,12 @@ output inside the same desktop session. Hyprland documents virtual outputs for
 remote-display servers in its [hyprctl reference](https://wiki.hypr.land/0.54.0/Configuring/Using-hyprctl/).
 The actual installed 0.56.2 Lua monitor API was used and its result read back.
 
-Current capture launches `grim` per frame, delivering lossless RGB PNG. It is a
-correctness baseline only. Next evaluate continuous PipeWire or compositor
-capture with hardware H.264 encoding (VA-API on compatible hardware), retaining
-bounded queues and dropping stale frames. Availability of an ffmpeg encoder
-does not establish that this host can use it successfully.
+The initial capture launched `grim` per frame, delivering lossless RGB PNG.
+The working native sender now uses [wf-recorder](https://github.com/ammen99/wf-recorder)
+for continuous compositor capture and verified VA-API H.264 encoding on this host.
+Its software fallback uses libx264. Keep one frame in flight; renderer congestion
+flushes the queue and waits for a keyframe. Broader GPU and compositor support
+still needs validation.
 
 [WayVNC](https://github.com/any1/wayvnc) and
 [Deskreen](https://github.com/pavlobu/deskreen) are useful comparison baselines.
@@ -135,11 +163,10 @@ not replace a camera-based end-to-end latency measurement.
 
 ## Next milestones
 
-1. Continuous Linux capture → H.264 → USB → decode on the connected iPad;
-   compare text and motion against PNG. Verify Safari WebCodecs before relying
-   on it, or move directly to the native receiver if browser behavior blocks us.
-2. Native full-screen iPad receiver with idle-sleep control, orientation,
-   reconnect and negotiated resolution/codec. Reuse on both iPads.
+1. Measure text quality, actual latency, power and thermal behavior of the working
+   native stream. Test disconnects, backgrounding and long sessions more broadly.
+2. Add device capability negotiation, orientation options and better connection
+   feedback to the native receiver. Validate the actual iPad 9.
 3. Linux host UI with device choice, mirror/extend, resolution/scale, connect,
    disconnect, and automatic output cleanup. Add input only after display is solid.
 4. Validate the iPad 9 on USB; add safe device switching and then optional

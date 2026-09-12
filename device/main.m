@@ -19,12 +19,12 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
 }
 
 @interface ScreenController : UIViewController {
-    VTDecompressionSessionRef _decoder;
     CMVideoFormatDescriptionRef _format;
     NSData *_sps, *_pps;
     BOOL _needsIDR;
     BOOL _hardware;
-    uint32_t _received, _decoded, _displayed, _errors;
+    uint32_t _received, _queued, _errors, _dropped;
+    NSInteger _renderStatus;
     uint32_t _width, _height;
     OSStatus _lastError;
     NSString *_lastStage;
@@ -33,13 +33,7 @@ static BOOL WriteAll(int fd, const void *buf, size_t len) {
 @property(nonatomic) AVSampleBufferDisplayLayer *video;
 @property(nonatomic) UILabel *label;
 @property(nonatomic) BOOL showStats;
-- (void)decodedImage:(CVImageBufferRef)image status:(OSStatus)status;
 @end
-
-static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlags flags,
-                    CVImageBufferRef image, CMTime pts, CMTime duration) {
-    [(__bridge ScreenController *)ref decodedImage:image status:status];
-}
 
 @implementation ScreenController
 - (BOOL)prefersStatusBarHidden { return YES; }
@@ -66,34 +60,29 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
     self.video.frame = self.view.bounds;
     self.label.frame = CGRectMake(20, 20, MIN(650, self.view.bounds.size.width - 40), 90);
 }
-- (void)toggleStats { self.showStats = !self.showStats; self.label.hidden = !self.showStats && _displayed > 0; }
+- (void)toggleStats { self.showStats = !self.showStats; self.label.hidden = !self.showStats && _queued > 0; }
 - (void)status:(NSString *)state force:(BOOL)force {
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     if (!force && now - _lastStatus < 1) return;
     _lastStatus = now;
-    NSDictionary *report = @{ @"state":state, @"received":@(_received), @"decoded":@(_decoded),
-        @"displayed":@(_displayed), @"errors":@(_errors), @"width":@(_width), @"height":@(_height),
+    NSDictionary *report = @{ @"state":state, @"received":@(_received),
+        @"queued":@(_queued), @"dropped":@(_dropped), @"rendering_status":@(_renderStatus), @"errors":@(_errors), @"width":@(_width), @"height":@(_height),
         @"hardware_h264_supported":@(_hardware), @"last_osstatus":@(_lastError), @"last_stage":_lastStage ?: @"none", @"elapsed_seconds":@(MAX(0, now - _started)), @"timestamp":@(now) };
     [[NSJSONSerialization dataWithJSONObject:report options:0 error:nil] writeToFile:StatusPath atomically:YES];
 }
-- (void)resetDecoder {
-    if (_decoder) { VTDecompressionSessionWaitForAsynchronousFrames(_decoder); VTDecompressionSessionInvalidate(_decoder); CFRelease(_decoder); _decoder = NULL; }
+- (void)resetFormat {
     if (_format) { CFRelease(_format); _format = NULL; }
     _needsIDR = YES;
 }
-- (BOOL)makeDecoder {
-    [self resetDecoder];
+- (BOOL)makeFormat {
+    [self resetFormat];
+    dispatch_sync(dispatch_get_main_queue(), ^{ [self.video flushAndRemoveImage]; });
     const uint8_t *sets[] = {_sps.bytes, _pps.bytes}; size_t sizes[] = {_sps.length, _pps.length};
     OSStatus result = CMVideoFormatDescriptionCreateFromH264ParameterSets(kCFAllocatorDefault, 2, sets, sizes, 4, &_format);
     if (result) { _lastError = result; return NO; }
     CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(_format);
-    if (dims.width <= 0 || dims.height <= 0 || dims.width > 4096 || dims.height > 4096) return NO;
+    if (dims.width <= 0 || dims.height <= 0 || dims.width > 4096 || dims.height > 4096) { [self resetFormat]; return NO; }
     _width = dims.width; _height = dims.height;
-    VTDecompressionOutputCallbackRecord callback = {Decoded, (__bridge void *)self};
-    NSDictionary *attributes = @{(__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey:@{}};
-    result = VTDecompressionSessionCreate(kCFAllocatorDefault, _format, NULL,
-                                          (__bridge CFDictionaryRef)attributes, &callback, &_decoder);
-    if (result) { _lastError = result; return NO; }
     // iOS headers do not expose macOS's per-session hardware-selection key.
     _hardware = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264);
     return YES;
@@ -119,8 +108,8 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
         offset += length;
     }
     if (offset != accessUnit.length) { _errors++; return; }
-    if ((!_decoder || changed) && _sps && _pps && ![self makeDecoder]) { _errors++; return; }
-    if (!_decoder || !picture.length || (_needsIDR && !idr)) return;
+    if ((!_format || changed) && _sps && _pps && ![self makeFormat]) { _errors++; return; }
+    if (!_format || !picture.length || (_needsIDR && !idr)) { _dropped++; return; }
     _needsIDR = NO;
     CMBlockBufferRef block = NULL; CMSampleBufferRef sample = NULL;
     OSStatus result = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, NULL, picture.length,
@@ -128,33 +117,35 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
     _lastStage = @"block-create";
     if (!result) { _lastStage = @"block-copy"; result = CMBlockBufferReplaceDataBytes(picture.bytes, block, 0, picture.length); }
     size_t size = picture.length;
-    CMSampleTimingInfo timing = {kCMTimeInvalid, CMTimeMake(_received, 30), kCMTimeInvalid};
-    if (!result) { _lastStage = @"sample-create"; result = CMSampleBufferCreateReady(kCFAllocatorDefault, block, _format, 1, 1, &timing, 1, &size, &sample); }
-    if (!result) { _lastStage = @"decode-frame"; result = VTDecompressionSessionDecodeFrame(_decoder, sample, 0, NULL, NULL); }
-    if (!result) VTDecompressionSessionWaitForAsynchronousFrames(_decoder);
+    if (!result) { _lastStage = @"sample-create"; result = CMSampleBufferCreateReady(kCFAllocatorDefault, block, _format, 1, 0, NULL, 1, &size, &sample); }
+    if (!result) {
+        _lastStage = @"native-display-layer";
+        CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, YES);
+        CFMutableDictionaryRef entry = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
+        CFDictionarySetValue(entry, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
+        CFDictionarySetValue(entry, kCMSampleAttachmentKey_NotSync, idr ? kCFBooleanFalse : kCFBooleanTrue);
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            if (self.video.status == AVQueuedSampleBufferRenderingStatusFailed) {
+                self->_lastError = (OSStatus)self.video.error.code; self->_errors++;
+                [self.video flush];
+                self->_needsIDR = YES;
+            }
+            if ((!self->_needsIDR || idr) && self.video.readyForMoreMediaData) {
+                [self.video enqueueSampleBuffer:sample]; self->_queued++;
+                self->_needsIDR = NO;
+            } else {
+                // Dropping a dependent frame requires a new keyframe to recover.
+                self->_needsIDR = YES; self->_dropped++;
+                [self.video flush];
+            }
+            self->_renderStatus = self.video.status;
+            self.label.hidden = !self.showStats;
+            self.label.text = [NSString stringWithFormat:@"USB · %u×%u · native H.264\n%u frames · %u errors", self->_width, self->_height, self->_queued, self->_errors];
+        });
+    }
     if (result) { _lastError = result; _errors++; _needsIDR = YES; }
     if (sample) CFRelease(sample); if (block) CFRelease(block);
     [self status:@"streaming" force:NO];
-}
-- (void)decodedImage:(CVImageBufferRef)image status:(OSStatus)status {
-    if (status || !image) { _lastError = status; _errors++; return; }
-    _decoded++;
-    dispatch_sync(dispatch_get_main_queue(), ^{
-        CMVideoFormatDescriptionRef format = NULL; CMSampleBufferRef sample = NULL;
-        CMSampleTimingInfo timing = {kCMTimeInvalid, kCMTimeZero, kCMTimeInvalid};
-        OSStatus result = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, image, &format);
-        if (!result) result = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, image, format, &timing, &sample);
-        if (!result) {
-            CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, YES);
-            CFDictionarySetValue((CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0), kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
-            if (self.video.status == AVQueuedSampleBufferRenderingStatusFailed) [self.video flush];
-            if (self.video.readyForMoreMediaData) { [self.video enqueueSampleBuffer:sample]; self->_displayed++; }
-            self.label.hidden = !self.showStats;
-            self.label.text = [NSString stringWithFormat:@"USB · %u×%u · VideoToolbox H.264\n%u decoded · %u queued · %u errors",
-                self->_width, self->_height, self->_decoded, self->_displayed, self->_errors];
-        } else self->_errors++;
-        if (sample) CFRelease(sample); if (format) CFRelease(format);
-    });
 }
 - (void)listen {
     int listener = socket(AF_INET, SOCK_STREAM, 0); int one = 1;
@@ -176,19 +167,19 @@ static void Decoded(void *ref, void *frameRef, OSStatus status, VTDecodeInfoFlag
         uint8_t hello[72];
         if (token.length != 64 || !ReadAll(fd, hello, sizeof(hello)) || memcmp(hello, "IPDS0001", 8) ||
             memcmp(hello + 8, token.UTF8String, 64) || !WriteAll(fd, "READY001", 8)) { close(fd); continue; }
-        _received = _decoded = _displayed = _errors = 0; _sps = _pps = nil;
+        _received = _queued = _errors = _dropped = 0; _lastError = 0; _sps = _pps = nil;
         _started = NSDate.date.timeIntervalSince1970;
-        [self resetDecoder];
+        [self resetFormat];
         while (YES) { @autoreleasepool {
             uint32_t length; if (!ReadAll(fd, &length, 4)) break; length = ntohl(length);
             if (!length || length > 8 * 1024 * 1024) break;
             NSMutableData *payload = [NSMutableData dataWithLength:length];
             if (!ReadAll(fd, payload.mutableBytes, length)) break;
             [self consume:payload];
-            uint32_t ack[] = {htonl(_received), htonl(_decoded), htonl(_displayed), htonl(_errors)};
+            uint32_t ack[] = {htonl(_received), 0, htonl(_queued), htonl(_errors)};
             if (!WriteAll(fd, ack, sizeof(ack))) break;
         }}
-        close(fd); [self resetDecoder]; [self status:@"disconnected" force:YES];
+        close(fd); [self resetFormat]; [self status:@"disconnected" force:YES];
         dispatch_sync(dispatch_get_main_queue(), ^{ [self.video flushAndRemoveImage]; self.label.hidden = NO; self.label.text = @"iPad Screen\nUSB stream stopped · Ready to reconnect"; });
     }}
 }
