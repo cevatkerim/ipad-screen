@@ -95,6 +95,13 @@ session. No Hyprland configuration files are changed. A forced kill or host cras
 can leave the output behind; inspect `hyprctl monitors -j` and then remove only
 the project output with `hyprctl output remove ipad-screen` if necessary.
 
+Changing scale, position or resolution while streaming restarts the capture
+process automatically, preserving the output's current settings and the USB
+connection. A brief pause is expected while the new encoder starts. An encoder
+exit or three-second stall also triggers recovery; repeated unexplained failures
+are bounded to five retries in 30 seconds. Removing the selected output ends
+the session. The session summary includes `capture_restarts`.
+
 The native listener binds only to iPad loopback and authenticates a receiver
 token before accepting frames. The host reaches it directly through usbmux;
 Wi-Fi and personal hotspot are not required. Video frames stay in memory.

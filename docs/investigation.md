@@ -32,6 +32,18 @@ or rendering errors. This does not establish 60 fps support. The default remains
 
 ## Initial baseline observations
 
+### Follow-up: live scale changes
+
+A user changing scale in Omarchy caused wf-recorder to exhaust its frame-copy
+retries and exit. The launcher previously treated encoder EOF as fatal. Capture
+now watches monitor geometry and restarts on layout changes, EOF or a stalled
+encoder while keeping the output and authenticated USB connection alive.
+Unexpected repeated failures are bounded; restarting never reapplies the initial
+scale. In a 45-second live test, scale 2→1 and then resolution 2224×1668→1920×1440
+with scale 2 triggered two successful recoveries: 1,270 frames queued, zero
+receiver errors. Automated cases cover layout changes, EOF, stalls, retry limits
+and child-process cleanup.
+
 - Connected device: iPad Pro 10.5-inch (`iPad7,3`), iPadOS 17.7.10, rootless
   jailbreak layout at `/var/jb`, OpenSSH 9.7p1. Exact jailbreak brand not identified.
 - Existing host public key installed for `mobile`; a fresh batch-mode login

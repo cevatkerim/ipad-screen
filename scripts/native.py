@@ -3,12 +3,14 @@
 import argparse
 import fcntl
 import json
-import os
 import re
 import signal
 import struct
 import subprocess
 import time
+import sys
+
+from capture import recovering_frames
 
 from ipad import RUNTIME, ssh_args
 from screen import hypr
@@ -54,6 +56,23 @@ def access_units(stream):
         yield b''.join(parts)
 
 
+def encoder_command(args, name, width, height, path):
+    if args.mode == 'test':
+        command = ['ffmpeg', '-hide_banner', '-loglevel', 'warning', '-re', '-f', 'lavfi',
+            '-i', f'testsrc2=size={width}x{height}:rate={args.fps}', '-an', '-c:v', 'libx264',
+            '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '18', '-pix_fmt', 'yuv420p',
+            '-x264-params', f'aud=1:repeat-headers=1:keyint={args.fps}:min-keyint={args.fps}:scenecut=0',
+            '-f', 'h264', '-y', path]
+    else:
+        command = ['wf-recorder', '-o', name, '-D', '-r', str(args.fps), '-b', '0', '-m', 'h264', '-y', '-f', path]
+        if args.encoder == 'software':
+            command += ['-c', 'libx264', '-x', 'yuv420p', '-p', 'preset=ultrafast', '-p', 'tune=zerolatency',
+                '-p', 'crf=18', '-p', f'x264-params=aud=1:repeat-headers=1:keyint={args.fps}:min-keyint={args.fps}:scenecut=0']
+        else:
+            command += ['-c', 'h264_vaapi', '-d', args.gpu, '-p', 'aud=1', '-p', f'g={args.fps}', '-p', 'qp=18']
+    return command
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=['extend', 'mirror', 'test'], default='extend')
@@ -79,8 +98,8 @@ def main():
             parser.error('--test-size requires test mode and dimensions such as 1280x720')
         width, height = map(int, args.test_size.split('x'))
     name = 'ipad-screen'
-    created, recorder, device, video = False, None, None, None
-    pipe_read = pipe_write = None
+    created, device, capture = False, None, None
+    restarts = 0
     last_ack, frames, sent = [0, 0, 0, 0], 0, 0
     started = time.monotonic()
     def stop(*unused):
@@ -120,30 +139,27 @@ def main():
         device.sendall(b'IPDS0001' + token.encode())
         if read_exact(device, 8) != b'READY001':
             raise ValueError('Receiver rejected protocol handshake')
-        pipe_read, pipe_write = os.pipe()
-        path = f'/proc/self/fd/{pipe_write}'
-        if args.mode == 'test':
-            command = ['ffmpeg', '-hide_banner', '-loglevel', 'warning', '-re', '-f', 'lavfi',
-                '-i', f'testsrc2=size={width}x{height}:rate={args.fps}', '-an', '-c:v', 'libx264',
-                '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '18', '-pix_fmt', 'yuv420p',
-                '-x264-params', f'aud=1:repeat-headers=1:keyint={args.fps}:min-keyint={args.fps}:scenecut=0',
-                '-f', 'h264', '-y', path]
-        else:
-            command = ['wf-recorder', '-o', name, '-D', '-r', str(args.fps), '-b', '0', '-m', 'h264', '-y', '-f', path]
-            if args.encoder == 'software':
-                command += ['-c', 'libx264', '-x', 'yuv420p', '-p', 'preset=ultrafast', '-p', 'tune=zerolatency',
-                    '-p', 'crf=18', '-p', f'x264-params=aud=1:repeat-headers=1:keyint={args.fps}:min-keyint={args.fps}:scenecut=0']
-            else:
-                command += ['-c', 'h264_vaapi', '-d', args.gpu, '-p', 'aud=1', '-p', f'g={args.fps}', '-p', 'qp=18']
         print(f'Native {args.mode}: {width}×{height} at requested {args.fps} fps. Ctrl+C stops.', flush=True)
-        recorder = subprocess.Popen(command, pass_fds=[pipe_write], stdout=log, stderr=log, stdin=subprocess.DEVNULL)
-        os.close(pipe_write)
-        pipe_write = None
-        video = os.fdopen(pipe_read, 'rb', buffering=0)
-        pipe_read = None
+        def layout():
+            if args.mode == 'test':
+                return ()
+            monitors = json.loads(hypr('monitors', '-j'))
+            if not any(m['name'] == name for m in monitors):
+                raise RuntimeError(f'Display {name} is no longer active')
+            fields = ('name', 'width', 'height', 'scale', 'transform', 'x', 'y', 'refreshRate')
+            return tuple(sorted(tuple(m.get(field) for field in fields) for m in monitors))
+
+        def restarted(reason):
+            nonlocal restarts
+            restarts += 1
+            print(f'Restarting capture: {reason}. USB session stays connected.', flush=True)
+
+        capture = recovering_frames(
+            lambda path: encoder_command(args, name, width, height, path),
+            layout, access_units, log, restarted)
         if args.seconds:
             signal.setitimer(signal.ITIMER_REAL, args.seconds)
-        for frame in access_units(video):
+        for frame in capture:
             device.sendall(struct.pack('>I', len(frame)) + frame)
             last_ack = list(struct.unpack('>IIII', read_exact(device, 16)))
             frames += 1
@@ -157,30 +173,24 @@ def main():
         pass
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if recorder is not None:
-            recorder.send_signal(signal.SIGINT)
+        if capture is not None:
+            capture.close()
         if device is not None:
             device.close()
-        if video is not None:
-            video.close()
-        for fd in (pipe_read, pipe_write):
-            if fd is not None:
-                os.close(fd)
-        if recorder is not None:
-            try:
-                recorder.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                recorder.kill()
-                recorder.wait()
         if created:
-            hypr('output', 'remove', 'ipad-screen')
+            if any(m['name'] == name for m in json.loads(hypr('monitors', '-j'))):
+                hypr('output', 'remove', name)
         log.close()
         result = dict(mode=args.mode, encoder='software' if args.mode == 'test' else args.encoder,
-            requested_fps=args.fps, frames_sent=frames, last_ack=last_ack, bytes_sent=sent,
+            capture_restarts=restarts, requested_fps=args.fps, frames_sent=frames, last_ack=last_ack, bytes_sent=sent,
             duration_seconds=round(time.monotonic()-started, 2))
         (RUNTIME / 'native-session.json').write_text(json.dumps(result, indent=2) + '\n')
         print('Stopped: ' + json.dumps(result), flush=True)
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(f'ipad-screen: {exc}', file=sys.stderr)
+        sys.exit(1)
